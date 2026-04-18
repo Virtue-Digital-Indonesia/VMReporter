@@ -1,0 +1,5 @@
+.env
+*.csv
+*.log
+report_*.txt
+.DS_Store
