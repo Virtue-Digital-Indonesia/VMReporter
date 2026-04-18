@@ -42,8 +42,13 @@ $result = foreach ($vm in $vms) {
     }
 }
 
-# Export to CSV with timestamp
-$timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+# Remove old CSV and report files
+Get-ChildItem -Path $PSScriptRoot -Filter "vminfo_*.csv" | Remove-Item -Force
+Get-ChildItem -Path $PSScriptRoot -Filter "report_*.txt" | Remove-Item -Force
+
+# Export to CSV
+$wib = [System.TimeZoneInfo]::ConvertTimeBySystemTimeZoneId((Get-Date), "SE Asia Standard Time")
+$timestamp = $wib.ToString("yyyyMMdd_HHmmss")
 $outputDir = $PSScriptRoot
 $result | Export-Csv "$outputDir/vminfo_$timestamp.csv" -NoTypeInformation
 

@@ -20,10 +20,9 @@ $vms = Import-Csv $latestCsv
 $timestamp = [regex]::Match($csvFiles[0].Name, 'vminfo_(\d{8})_(\d{6})\.csv')
 $dateStr = $timestamp.Groups[1].Value
 $timeStr = $timestamp.Groups[2].Value
-$reportDate = [datetime]::ParseExact($dateStr, "yyyyMMdd", $null)
-$reportTime = [datetime]::ParseExact($timeStr, "HHmmss", $null)
-$formattedDate = $reportDate.ToString("dd MMMM yyyy", [System.Globalization.CultureInfo]::new("id-ID"))
-$formattedTime = $reportTime.ToString("HH:mm")
+$reportDateTime = [datetime]::ParseExact("${dateStr}_${timeStr}", "yyyyMMdd_HHmmss", $null)
+$formattedDate = $reportDateTime.ToString("dd MMMM yyyy", [System.Globalization.CultureInfo]::new("id-ID"))
+$formattedTime = $reportDateTime.ToString("HH:mm")
 
 # --- Helper function ---
 function Get-GroupStats($vmList) {
