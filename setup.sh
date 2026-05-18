@@ -24,8 +24,10 @@ pwsh -Command "Set-PowerCLIConfiguration -InvalidCertificateAction Ignore -Confi
 # Install cron job for 8:00 AM WIB (UTC+7 = 01:00 UTC)
 CRON_CMD="0 1 * * * /usr/bin/pwsh -File $SCRIPT_DIR/VMReporter.ps1 >> $SCRIPT_DIR/vmreporter.log 2>> $SCRIPT_DIR/vmreporter_error.log"
 
+PVE_CRON="5 1 * * * /usr/bin/pwsh -File $SCRIPT_DIR/ProxmoxReporter.ps1 >> $SCRIPT_DIR/proxmoxreporter.log 2>> $SCRIPT_DIR/proxmoxreporter_error.log"
+
 # Check if cron job already exists
-(crontab -l 2>/dev/null | grep -v "VMReporter.ps1"; echo "$CRON_CMD") | crontab -
+(crontab -l 2>/dev/null | grep -v "VMReporter.ps1" | grep -v "ProxmoxReporter.ps1"; echo "$CRON_CMD"; echo "$PVE_CRON") | crontab -
 
 echo "Setup complete!"
 echo "Cron job installed: runs daily at 08:00 WIB (01:00 UTC)"
