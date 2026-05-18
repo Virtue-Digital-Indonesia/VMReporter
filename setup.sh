@@ -30,13 +30,17 @@ PVE_CRON="5 1 * * * /usr/bin/pwsh -File $SCRIPT_DIR/ProxmoxReporter.ps1 >> $SCRI
 (crontab -l 2>/dev/null | grep -v "VMReporter.ps1" | grep -v "ProxmoxReporter.ps1"; echo "$CRON_CMD"; echo "$PVE_CRON") | crontab -
 
 echo "Setup complete!"
-echo "Cron job installed: runs daily at 08:00 WIB (01:00 UTC)"
+echo ""
+echo "Cron jobs installed:"
+echo "  VMReporter      : daily at 08:00 WIB (01:00 UTC)"
+echo "  ProxmoxReporter : daily at 08:05 WIB (01:05 UTC)"
 echo ""
 echo "Make sure to edit .env with your credentials:"
 echo "  $SCRIPT_DIR/.env"
 echo ""
 echo "To test manually:"
 echo "  pwsh -File $SCRIPT_DIR/VMReporter.ps1"
+echo "  pwsh -File $SCRIPT_DIR/ProxmoxReporter.ps1"
 echo ""
 echo "To check cron:"
 echo "  crontab -l"
