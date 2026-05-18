@@ -179,24 +179,24 @@ Write-Output "Report saved to: $reportFile"
 $botToken = $env:TELEGRAM_BOT_TOKEN
 $chatId   = $env:TELEGRAM_CHAT_ID
 
-# if ($botToken -and $chatId) {
+if ($botToken -and $chatId) {
 
-#     $uri = "https://api.telegram.org/bot$botToken/sendMessage"
+    $uri = "https://api.telegram.org/bot$botToken/sendMessage"
 
-#     $body = @{
-#         chat_id    = $chatId
-#         text       = $reportText
-#         parse_mode = "HTML"
-#     }
+    $body = @{
+        chat_id    = $chatId
+        text       = $reportText
+        parse_mode = "HTML"
+    }
 
-#     try {
-#         Invoke-RestMethod -Uri $uri -Method Post -Body $body | Out-Null
-#         Write-Output "Report sent to Telegram."
-#     }
-#     catch {
-#         Write-Warning "Failed to send Telegram message: $_"
-#     }
-# }
-# else {
-#     Write-Warning "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set, skipping Telegram."
-# }
+    try {
+        Invoke-RestMethod -Uri $uri -Method Post -Body $body | Out-Null
+        Write-Output "Report sent to Telegram."
+    }
+    catch {
+        Write-Warning "Failed to send Telegram message: $_"
+    }
+}
+else {
+    Write-Warning "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set, skipping Telegram."
+}
