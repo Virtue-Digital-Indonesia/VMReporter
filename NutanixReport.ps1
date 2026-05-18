@@ -18,43 +18,52 @@ Get-Content $envFile | ForEach-Object {
 }
 
 # =========================
-# Find latest CSV
+# Find latest cluster CSV (primary source)
 # =========================
 
-$csvFiles = Get-ChildItem `
+$clusterCsvFiles = Get-ChildItem `
+    -Path $PSScriptRoot `
+    -Filter "nutanixcluster_*.csv" `
+    -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending
+
+if ($clusterCsvFiles.Count -eq 0) {
+    Write-Error "No nutanixcluster_*.csv found"
+    exit 1
+}
+
+$clusterCsv = Import-Csv $clusterCsvFiles[0].FullName | Select-Object -First 1
+
+# =========================
+# Find latest VM CSV (for VM count breakdown)
+# =========================
+
+$vmCsvFiles = Get-ChildItem `
     -Path $PSScriptRoot `
     -Filter "nutanixinfo_*.csv" `
     -ErrorAction SilentlyContinue |
     Sort-Object LastWriteTime -Descending
 
-if ($csvFiles.Count -eq 0) {
+if ($vmCsvFiles.Count -eq 0) {
     Write-Error "No nutanixinfo_*.csv found"
     exit 1
 }
 
-$latestCsv = $csvFiles[0].FullName
-$vms = Import-Csv $latestCsv
+$vms = Import-Csv $vmCsvFiles[0].FullName
 
-if ($vms.Count -eq 0) {
-    Write-Error "CSV is empty"
-    exit 1
-}
-
-# Cast numeric columns
+# Cast numeric columns for VM CSV
 $vms = $vms | ForEach-Object {
     $_.CPUs           = [int]$_.CPUs
-    $_.CPUUsagePct    = [double]$_.CPUUsagePct
     $_.MemoryGB       = [double]$_.MemoryGB
-    $_.MemoryUsagePct = [double]$_.MemoryUsagePct
     $_.DiskGB         = [double]$_.DiskGB
     $_
 }
 
 # =========================
-# Parse timestamp
+# Parse timestamp from cluster file
 # =========================
 
-$match = [regex]::Match($csvFiles[0].Name, "nutanixinfo_(\d{8})_(\d{6})\.csv")
+$match = [regex]::Match($clusterCsvFiles[0].Name, "nutanixcluster_(\d{8})_(\d{6})\.csv")
 $dateStr = $match.Groups[1].Value
 $timeStr = $match.Groups[2].Value
 
@@ -69,81 +78,89 @@ $formattedDate = $reportDateTime.ToString("dd MMMM yyyy", $idCulture)
 $formattedTime = $reportDateTime.ToString("HH:mm")
 
 # =========================
-# Compute stats
+# Stats
 # =========================
 
+# VM counts from per-VM CSV
 $totalVMs   = $vms.Count
 $runningVMs = ($vms | Where-Object { $_.Status -eq 'running' }).Count
 $stoppedVMs = $totalVMs - $runningVMs
 
-$totalCpu    = ($vms | Measure-Object -Property CPUs -Sum).Sum
-$totalMemGB  = [math]::Round(($vms | Measure-Object -Property MemoryGB -Sum).Sum, 2)
-$totalDiskGB = [math]::Round(($vms | Measure-Object -Property DiskGB -Sum).Sum, 2)
+# Allocated resources (sum across VMs)
+$totalVCpus      = ($vms | Measure-Object -Property CPUs -Sum).Sum
+$totalAllocMemGB = [math]::Round(($vms | Measure-Object -Property MemoryGB -Sum).Sum, 2)
+$totalAllocDiskGB = [math]::Round(($vms | Measure-Object -Property DiskGB -Sum).Sum, 2)
 
-# Memory used = sum(memory * usage%) across running VMs
-$runningVMList = $vms | Where-Object { $_.Status -eq 'running' }
-
-$usedMemGB = 0
-
-foreach ($vm in $runningVMList) {
-    $usedMemGB += ($vm.MemoryGB * $vm.MemoryUsagePct / 100)
-}
-
-$usedMemGB = [math]::Round($usedMemGB, 2)
-
-$memUtilization = if ($totalMemGB -gt 0) {
-    [math]::Round(($usedMemGB / $totalMemGB) * 100, 2)
-} else { 0 }
-
-# CPU avg across running VMs
-if ($runningVMList.Count -gt 0) {
-    $avgCpuUsage = [math]::Round(
-        ($runningVMList | Measure-Object -Property CPUUsagePct -Average).Average,
-        2
-    )
-} else {
-    $avgCpuUsage = 0
-}
+# Cluster physical capacity + actual usage from cluster CSV
+$clusterName       = $clusterCsv.ClusterName
+$physicalCpuGHz    = [double]$clusterCsv.TotalPhysicalCpuGHz
+$physicalMemGB     = [double]$clusterCsv.TotalPhysicalMemGB
+$cpuUsagePct       = [double]$clusterCsv.ClusterCpuPct
+$memUsagePct       = [double]$clusterCsv.ClusterMemPct
+$memUsedGB         = [double]$clusterCsv.ClusterUsedMemGB
+$storageCapGB      = [double]$clusterCsv.StorageCapacityGB
+$storageUsedGB     = [double]$clusterCsv.StorageUsedGB
+$storagePct        = [double]$clusterCsv.StoragePct
 
 # =========================
-# Build Telegram (HTML)
+# Build report (HTML for Telegram)
 # =========================
 
 $tgReport = @()
-$tgReport += "<b>Nutanix AHV Report</b>"
+$tgReport += "<b>Nutanix AHU Report - $clusterName</b>"
 $tgReport += "$formattedDate, $formattedTime WIB"
 $tgReport += ""
 $tgReport += "<pre>"
-$tgReport += "Total VMs       : $($totalVMs.ToString('N0'))"
-$tgReport += "  Running       : $runningVMs"
-$tgReport += "  Stopped       : $stoppedVMs"
-$tgReport += "Total vCPUs     : $($totalCpu.ToString('N0'))"
-$tgReport += "Total Memory    : $($totalMemGB.ToString('N2')) GB"
-$tgReport += "Used Memory     : $($usedMemGB.ToString('N2')) GB"
-$tgReport += "Memory Usage    : $($memUtilization.ToString('N2'))%"
-$tgReport += "Avg CPU Usage   : $($avgCpuUsage.ToString('N2'))%"
-$tgReport += "Total Disk      : $($totalDiskGB.ToString('N2')) GB"
+$tgReport += "VM Inventory"
+$tgReport += "  Total VMs       : $($totalVMs.ToString('N0'))"
+$tgReport += "  Running         : $runningVMs"
+$tgReport += "  Stopped         : $stoppedVMs"
+$tgReport += ""
+$tgReport += "Allocated to VMs"
+$tgReport += "  Total vCPUs     : $($totalVCpus.ToString('N0'))"
+$tgReport += "  Total Memory    : $($totalAllocMemGB.ToString('N2')) GB"
+$tgReport += "  Total Disk      : $($totalAllocDiskGB.ToString('N2')) GB"
+$tgReport += ""
+$tgReport += "Cluster Capacity"
+$tgReport += "  Physical CPU    : $($physicalCpuGHz.ToString('N2')) GHz"
+$tgReport += "  Physical Memory : $($physicalMemGB.ToString('N2')) GB"
+$tgReport += "  Storage         : $($storageCapGB.ToString('N2')) GB"
+$tgReport += ""
+$tgReport += "Cluster Utilization"
+$tgReport += "  CPU Usage       : $($cpuUsagePct.ToString('N2'))%"
+$tgReport += "  Memory Usage    : $($memUsedGB.ToString('N2')) GB ($($memUsagePct.ToString('N2'))%)"
+$tgReport += "  Storage Usage   : $($storageUsedGB.ToString('N2')) GB ($($storagePct.ToString('N2'))%)"
 $tgReport += "</pre>"
 
 $reportText = $tgReport -join "`n"
 
 # =========================
-# Plain text (for .txt file)
+# Plain text version
 # =========================
 
 $plainReport = @()
-$plainReport += "Nutanix AHV Report"
+$plainReport += "Nutanix AHU Report - $clusterName"
 $plainReport += "$formattedDate, $formattedTime WIB"
 $plainReport += ""
-$plainReport += "Total VMs       : $($totalVMs.ToString('N0'))"
-$plainReport += "  Running       : $runningVMs"
-$plainReport += "  Stopped       : $stoppedVMs"
-$plainReport += "Total vCPUs     : $($totalCpu.ToString('N0'))"
-$plainReport += "Total Memory    : $($totalMemGB.ToString('N2')) GB"
-$plainReport += "Used Memory     : $($usedMemGB.ToString('N2')) GB"
-$plainReport += "Memory Usage    : $($memUtilization.ToString('N2'))%"
-$plainReport += "Avg CPU Usage   : $($avgCpuUsage.ToString('N2'))%"
-$plainReport += "Total Disk      : $($totalDiskGB.ToString('N2')) GB"
+$plainReport += "VM Inventory"
+$plainReport += "  Total VMs       : $($totalVMs.ToString('N0'))"
+$plainReport += "  Running         : $runningVMs"
+$plainReport += "  Stopped         : $stoppedVMs"
+$plainReport += ""
+$plainReport += "Allocated to VMs"
+$plainReport += "  Total vCPUs     : $($totalVCpus.ToString('N0'))"
+$plainReport += "  Total Memory    : $($totalAllocMemGB.ToString('N2')) GB"
+$plainReport += "  Total Disk      : $($totalAllocDiskGB.ToString('N2')) GB"
+$plainReport += ""
+$plainReport += "Cluster Capacity"
+$plainReport += "  Physical CPU    : $($physicalCpuGHz.ToString('N2')) GHz"
+$plainReport += "  Physical Memory : $($physicalMemGB.ToString('N2')) GB"
+$plainReport += "  Storage         : $($storageCapGB.ToString('N2')) GB"
+$plainReport += ""
+$plainReport += "Cluster Utilization"
+$plainReport += "  CPU Usage       : $($cpuUsagePct.ToString('N2'))%"
+$plainReport += "  Memory Usage    : $($memUsedGB.ToString('N2')) GB ($($memUsagePct.ToString('N2'))%)"
+$plainReport += "  Storage Usage   : $($storageUsedGB.ToString('N2')) GB ($($storagePct.ToString('N2'))%)"
 
 $plainText = $plainReport -join "`n"
 
@@ -156,30 +173,30 @@ Write-Output ""
 Write-Output "Report saved to: $reportFile"
 
 # =========================
-# Send Telegram
+# Telegram
 # =========================
 
 $botToken = $env:TELEGRAM_BOT_TOKEN
 $chatId   = $env:TELEGRAM_CHAT_ID
 
-if ($botToken -and $chatId) {
+# if ($botToken -and $chatId) {
 
-    $uri = "https://api.telegram.org/bot$botToken/sendMessage"
+#     $uri = "https://api.telegram.org/bot$botToken/sendMessage"
 
-    $body = @{
-        chat_id    = $chatId
-        text       = $reportText
-        parse_mode = "HTML"
-    }
+#     $body = @{
+#         chat_id    = $chatId
+#         text       = $reportText
+#         parse_mode = "HTML"
+#     }
 
-    try {
-        Invoke-RestMethod -Uri $uri -Method Post -Body $body | Out-Null
-        Write-Output "Report sent to Telegram."
-    }
-    catch {
-        Write-Warning "Failed to send Telegram message: $_"
-    }
-}
-else {
-    Write-Warning "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set, skipping Telegram."
-}
+#     try {
+#         Invoke-RestMethod -Uri $uri -Method Post -Body $body | Out-Null
+#         Write-Output "Report sent to Telegram."
+#     }
+#     catch {
+#         Write-Warning "Failed to send Telegram message: $_"
+#     }
+# }
+# else {
+#     Write-Warning "TELEGRAM_BOT_TOKEN or TELEGRAM_CHAT_ID not set, skipping Telegram."
+# }
